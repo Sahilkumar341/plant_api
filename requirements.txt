@@ -1,5 +1,5 @@
-Flask==2.0.3
-Flask-Cors==3.1.1
-tensorflow==2.11.0
-gdown==4.2.0  # Add this line
-Pillow==8.4.0
+Flask
+Flask-Cors
+tensorflow
+gdown
+Pillow
