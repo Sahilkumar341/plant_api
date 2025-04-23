@@ -12,8 +12,9 @@ CORS(app)  # Enable CORS for all domains
 
 # --------------------------
 # Step 1: Download model if not already
-MODEL_PATH = "best_model2.keras"
-FILE_ID = "185mTTsmaPW_kAEMqoM-Kl-RKpe_6E210"
+MODEL_PATH = "model_compressed.h5"
+
+FILE_ID = "1p-BH4TKdSe9Azq0jifqYbwkX4vLK1LZU"
 
 if not os.path.exists(MODEL_PATH):
     print("Downloading model from Google Drive...")
@@ -28,7 +29,7 @@ model = tf.keras.models.load_model(MODEL_PATH)
 def preprocess_image(image_bytes):
     try:
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        image = image.resize((224, 224))
+        image = image.resize((64, 64))
         image_array = np.array(image) / 255.0
         return np.expand_dims(image_array, axis=0)
     except Exception as e:
@@ -48,14 +49,13 @@ def predict():
             return jsonify({'error': 'Invalid image format'}), 400
 
         image_tensor = preprocess_image(image_file.read())
-        predictions = model.predict(image_tensor)
-        class_index = int(np.argmax(predictions))
-        confidence = float(np.max(predictions))
+        prediction = model.predict(image_tensor)
 
-        return jsonify({
-            'class': class_index,
-            'confidence': round(confidence * 100, 2)
-        })
+        plant_id = int(np.argmax(prediction[0]))
+        disease_id = int(np.argmax(prediction[1]))
+        severity_id = int(np.argmax(prediction[2]))
+
+        return [plant_id, disease_id, severity_id]
 
     except Exception as e:
         print("Prediction error:", e)
