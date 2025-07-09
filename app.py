@@ -8,34 +8,39 @@
 # import gdown
 
 # app = Flask(__name__)
-# CORS(app, resources={r"/*": {"origins": "*"}})  # Improved CORS setup
+# CORS(app, resources={r"/*": {"origins": "*"}})
 
-# # --------------------------
-# # Step 1: Download model if not already
-# MODEL_PATH = "model_compressed.h5"
-# FILE_ID = "1p-BH4TKdSe9Azq0jifqYbwkX4vLK1LZU"
-
-# if not os.path.exists(MODEL_PATH):
+# # ----------------------------
+# # Step 1: Download TFLite model from Google Drive if not exists
+# TFLITE_MODEL_PATH = "model_quant_updated.tflite"
+# DRIVE_FILE_ID = "1m9BQV3BHsL1fkzCljOtkr7Y4C08XsUAP"
+#   # Change this to your actual file ID
+# # https://drive.google.com/file/d/1m9BQV3BHsL1fkzCljOtkr7Y4C08XsUAP/view?usp=drive_link
+# if not os.path.exists(TFLITE_MODEL_PATH):
 #     print("Downloading model from Google Drive...")
-#     gdown.download(f"https://drive.google.com/uc?id={FILE_ID}", MODEL_PATH, quiet=False)
+#     gdown.download(f"https://drive.google.com/uc?id={DRIVE_FILE_ID}", TFLITE_MODEL_PATH, quiet=False)
 
-# # --------------------------
-# # Step 2: Load model
-# model = tf.keras.models.load_model(MODEL_PATH)
+# # ----------------------------
+# # Step 2: Load TFLite model
+# interpreter = tf.lite.Interpreter(model_path=TFLITE_MODEL_PATH)
+# interpreter.allocate_tensors()
+# input_details = interpreter.get_input_details()
+# output_details = interpreter.get_output_details()
 
-# # --------------------------
+# # ----------------------------
 # # Step 3: Preprocess image
 # def preprocess_image(image_bytes):
 #     try:
 #         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 #         image = image.resize((64, 64))
 #         image_array = np.array(image) / 255.0
-#         return np.expand_dims(image_array, axis=0)
+#         image_array = np.expand_dims(image_array, axis=0).astype(np.float32)
+#         return image_array
 #     except Exception as e:
 #         print("Image preprocessing error:", e)
 #         raise
 
-# # --------------------------
+# # ----------------------------
 # # Step 4: Prediction endpoint
 # @app.route('/predict', methods=['POST'])
 # def predict():
@@ -48,19 +53,23 @@
 #             return jsonify({'error': 'Invalid image format'}), 400
 
 #         image_tensor = preprocess_image(image_file.read())
-#         prediction = model.predict(image_tensor)
 
-#         # Extract each prediction safely
-#         try:
-#             plant_index = int(np.argmax(prediction[0]))
-#             disease_index = int(np.argmax(prediction[1]))
-#             severity_index = int(np.argmax(prediction[2]))
-#         except Exception as e:
-#             print("Error extracting prediction indices:", e)
-#             return jsonify({'error': 'Failed to extract predictions'}), 500
+#         interpreter.set_tensor(input_details[0]['index'], image_tensor)
+#         interpreter.invoke()
 
-#         print("Predictions:", prediction)
-#         print(f"Plant: {plant_index}, Disease: {disease_index}, Severity: {severity_index}")
+#         plant_pred = interpreter.get_tensor(output_details[0]['index'])
+#         disease_pred = interpreter.get_tensor(output_details[1]['index'])
+#         severity_pred = interpreter.get_tensor(output_details[2]['index'])
+
+#         plant_index = int(np.argmax(plant_pred))
+#         disease_index = int(np.argmax(disease_pred))
+#         severity_index = int(np.argmax(severity_pred))
+
+#         print("Prediction:", {
+#             "plant": plant_index,
+#             "disease": disease_index,
+#             "severity": severity_index
+#         })
 
 #         return jsonify({
 #             "plant": plant_index,
@@ -72,46 +81,91 @@
 #         print("Prediction error:", e)
 #         return jsonify({'error': 'Error processing image'}), 500
 
-# # --------------------------
+# # ----------------------------
 # # Step 5: Run server
 # if __name__ == '__main__':
-#     app.run(host='0.0.0.0', port=5000)
+#     app.run(host='0.0.0.0',  port=int(os.environ.get("PORT", 5000)))
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from PIL import Image
 import numpy as np
 import tensorflow as tf
+import torch
+from torchvision import transforms
+import cv2
 import io
 import os
 import gdown
 
+# -----------------------------
+# Flask setup
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# ----------------------------
-# Step 1: Download TFLite model from Google Drive if not exists
-TFLITE_MODEL_PATH = "model_quant.tflite"
-DRIVE_FILE_ID = "1wDfAr6oFC8dmI1KG2I3-1l4SOKkcFvAg"
-  # Change this to your actual file ID
-
+# -----------------------------
+# Step 1: Download TFLite model
+TFLITE_MODEL_PATH = "model_quant_updated.tflite"
+TFLITE_FILE_ID = "1m9BQV3BHsL1fkzCljOtkr7Y4C08XsUAP"
 if not os.path.exists(TFLITE_MODEL_PATH):
-    print("Downloading model from Google Drive...")
-    gdown.download(f"https://drive.google.com/uc?id={DRIVE_FILE_ID}", TFLITE_MODEL_PATH, quiet=False)
+    print("Downloading TFLite model...")
+    gdown.download(f"https://drive.google.com/uc?id={TFLITE_FILE_ID}", TFLITE_MODEL_PATH, quiet=False)
 
-# ----------------------------
-# Step 2: Load TFLite model
+# -----------------------------
+# Step 2: Load TensorFlow Lite model
 interpreter = tf.lite.Interpreter(model_path=TFLITE_MODEL_PATH)
 interpreter.allocate_tensors()
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
-# ----------------------------
-# Step 3: Preprocess image
+# -----------------------------
+# Step 3: Download and Load U²-Net (U2NETP) model
+from u2net import U2NETP  # Make sure you have u2net.py in the same folder or installed as module
+
+U2NET_MODEL_PATH = "u2netp.pth"
+U2NET_FILE_ID = "1rbSTGKAE-MTxBYHd-51l2hMOQPT_7EPy"  # U2NETP model from official repo
+
+if not os.path.exists(U2NET_MODEL_PATH):
+    print("Downloading U2NETP model...")
+    gdown.download(f"https://drive.google.com/uc?id={U2NET_FILE_ID}", U2NET_MODEL_PATH, quiet=False)
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model_u2net = U2NETP(3, 1)
+model_u2net.load_state_dict(torch.load(U2NET_MODEL_PATH, map_location=device))
+model_u2net.to(device)
+model_u2net.eval()
+
+transform_u2net = transforms.Compose([
+    transforms.Resize((320, 320)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.485, 0.456, 0.406],
+                         [0.229, 0.224, 0.225])
+])
+
+# -----------------------------
+# Step 4: Background removal
+def remove_background_single_image(pil_img):
+    original_size = pil_img.size
+    input_tensor = transform_u2net(pil_img).unsqueeze(0).to(device)
+
+    with torch.no_grad():
+        d1, *_ = model_u2net(input_tensor)
+        mask = d1[0][0].cpu().numpy()
+        mask = (mask - mask.min()) / (mask.max() - mask.min())
+        mask = cv2.resize(mask, original_size)
+
+    image_np = np.array(pil_img)
+    result = image_np * mask[..., None]
+    result = result.astype(np.uint8)
+    return Image.fromarray(result).convert("RGB")
+
+# -----------------------------
+# Step 5: Preprocess image
 def preprocess_image(image_bytes):
     try:
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        image = image.resize((64, 64))
+        image = remove_background_single_image(image)  # Apply U²-Net
+        image = image.resize((64, 64))  # Match model input
         image_array = np.array(image) / 255.0
         image_array = np.expand_dims(image_array, axis=0).astype(np.float32)
         return image_array
@@ -119,8 +173,8 @@ def preprocess_image(image_bytes):
         print("Image preprocessing error:", e)
         raise
 
-# ----------------------------
-# Step 4: Prediction endpoint
+# -----------------------------
+# Step 6: Prediction route
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
@@ -160,8 +214,7 @@ def predict():
         print("Prediction error:", e)
         return jsonify({'error': 'Error processing image'}), 500
 
-# ----------------------------
-# Step 5: Run server
+# -----------------------------
+# Step 7: Run server
 if __name__ == '__main__':
-    app.run(host='0.0.0.0',  port=int(os.environ.get("PORT", 5000)))
-
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
