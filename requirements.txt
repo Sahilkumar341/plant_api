@@ -3,3 +3,5 @@ Flask-Cors
 tensorflow
 gdown
 Pillow
+torch
+torchvision
