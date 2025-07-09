@@ -175,6 +175,10 @@ def preprocess_image(image_bytes):
 
 # -----------------------------
 # Step 6: Prediction route
+@app.route('/')
+def home():
+    return 'Server is running!'
+
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
